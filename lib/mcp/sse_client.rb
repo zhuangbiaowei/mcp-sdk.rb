@@ -1,7 +1,7 @@
 module MCP
   class SSEClient < StdioClient
     def initialize(url, opt = {})
-      @server = ChildProcess.build("node", File.expand_path("proxy.js",File.expand_path(File.dirname(__FILE__), "../..")), url)
+      @server = ChildProcess.build("node", File.expand_path("../../proxy.js", File.dirname(__FILE__)), url)
       @stdout, @stdout_writer = IO.pipe
       @stderr, @stderr_writer = IO.pipe
       @server.io.stdout = @stdout_writer
