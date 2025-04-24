@@ -1,5 +1,7 @@
 require File.expand_path("../mcp/types", __FILE__)
 require File.expand_path("../mcp/client", __FILE__)
+require File.expand_path("../mcp/stdio_client", __FILE__)
+require File.expand_path("../mcp/sse_client", __FILE__)
 require File.expand_path("../mcp/convert", __FILE__)
 
 module MCP
