@@ -10,6 +10,7 @@ module MCP
       @response_queue = Queue.new
       @running = false
       @endpoint = nil
+      @temp_chunk = nil
       uri = URI(url)
       @conn = Faraday.new(url: uri.origin) do |f|
         f.adapter :net_http
@@ -22,16 +23,32 @@ module MCP
           req.headers["Content-Type"] = "application/json"
 
           req.options.on_data = proc do |chunk, overall_received_bytes|
-            event_type = chunk.split("\n")[0].split(":")[1]
-            if event_type == "endpoint"
-              @endpoint = chunk.split("\n")[1][5..-1]
+            if @temp_chunk == nil
+              @temp_chunk = chunk
+            else
+              @temp_chunk += chunk
             end
-            if event_type == "message"
-              handle_response(chunk.split("\n")[1][5..-1])
+            event_type = @temp_chunk.split("\n")[0].split(":")[1].strip
+            data = @temp_chunk.split("\n")[1][5..-1].strip
+            if event_type == "endpoint"
+              @endpoint = data
+              @temp_chunk = nil
+            else
+              if verify_json(data) && event_type == "message"
+                handle_response(data)
+                @temp_chunk = nil
+              end
             end
           end
         end
       end
+    end
+
+    def verify_json(str)
+      JSON.parse(str)
+      true
+    rescue JSON::ParserError
+      false
     end
 
     def write_request(message)
