@@ -1,11 +1,11 @@
 Gem::Specification.new do |spec|
-  spec.name = "mcp-sdk"
-  spec.version = "0.1.0"
+  spec.name = "mcp-sdk.rb"
+  spec.version = "0.1.1"
   spec.authors = ["Zhuang Biaowei"]
   spec.email = ["zbw@kaiyuanshe.org"]
 
   spec.summary = "MCP SDK for Ruby"
-  spec.description = "A Ruby SDK for the MCP (Multi-Channel Protocol) implementation"
+  spec.description = "A Ruby SDK for the MCP (Model Context Protocol) implementation"
   spec.homepage = "https://github.com/zhuangbiaowei/mcp-sdk.rb"
   spec.license = "MIT"
 

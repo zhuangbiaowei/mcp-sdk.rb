@@ -14,31 +14,43 @@ module MCP
       uri = URI(url)
       @conn = Faraday.new(url: uri.origin) do |f|
         f.adapter :net_http
+        f.options.timeout = 30           # read timeout
+        f.options.open_timeout = 10      # connection timeout
       end
-      Thread.new do
-        @conn.get do |req|
-          req.url uri.request_uri
-          req.headers["Accept"] = "text/event-streaml; charset=utf-8"
-          req.headers["Accept-Encoding"] = "identity"
-          req.headers["Content-Type"] = "application/json"
+      @thread = Thread.new do
+        loop do
+          begin
+            @conn.get do |req|
+              req.url uri.request_uri
+              req.headers["Accept"] = "text/event-stream; charset=utf-8"
+              req.headers["Accept-Encoding"] = "identity"
+              req.headers["Content-Type"] = "application/json"
 
-          req.options.on_data = proc do |chunk, overall_received_bytes|
-            if @temp_chunk == nil
-              @temp_chunk = chunk
-            else
-              @temp_chunk += chunk
-            end
-            event_type = @temp_chunk.split("\n")[0].split(":")[1].strip
-            data = @temp_chunk.split("\n")[1][5..-1].strip
-            if event_type == "endpoint"
-              @endpoint = data
-              @temp_chunk = nil
-            else
-              if verify_json(data) && event_type == "message"
-                handle_response(data)
-                @temp_chunk = nil
+              req.options.on_data = proc do |chunk, overall_received_bytes|
+                if @temp_chunk == nil
+                  @temp_chunk = chunk
+                else
+                  @temp_chunk += chunk
+                end
+                event_type = @temp_chunk.split("\n")[0].split(":")[1].strip
+                data = @temp_chunk.split("\n")[1][5..-1].strip
+                if event_type == "endpoint"
+                  @endpoint = data
+                  @temp_chunk = nil
+                else
+                  if verify_json(data) && event_type == "message"
+                    handle_response(data)
+                    @temp_chunk = nil
+                  end
+                end
               end
             end
+          rescue Faraday::Error => e
+            #puts "SSE connection error: #{e.message}"
+            sleep 1
+          rescue => e
+            #puts "Unexpected error in SSE thread: #{e.message}"
+            sleep 1
           end
         end
       end
