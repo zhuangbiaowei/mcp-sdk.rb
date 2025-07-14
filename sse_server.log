@@ -1,0 +1,9 @@
+nohup: ignoring input
+MCP SSE Server starting...
+MCP Server 'Demo' v1.0.0 (SSE) starting on port 8080...
+Available tools: add
+SSE Server ready at http://localhost:8080
+MCP SSE Protocol Endpoints:
+  GET /sse - Get message endpoint (returns 'event: endpoint\ndata: /mcp/message')
+  POST /mcp/message - Send JSON-RPC requests and receive SSE responses
+  GET /health - Health check

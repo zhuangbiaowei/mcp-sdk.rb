@@ -123,10 +123,9 @@ module MCP
       @sse_server.add_tcp_listener("0.0.0.0", @port)
       
       puts "SSE Server ready at http://localhost:#{@port}"
-      puts "Endpoints:"
-      puts "  GET /sse - Server-Sent Events endpoint"
-      puts "  POST /mcp - JSON-RPC endpoint"
-      puts "  GET /tools - List tools"
+      puts "MCP SSE Protocol Endpoints:"
+      puts "  GET /sse - Get message endpoint (returns 'event: endpoint\\ndata: /mcp/message')"
+      puts "  POST /mcp/message - Send JSON-RPC requests and receive SSE responses"
       puts "  GET /health - Health check"
       
       @sse_server.run.join
@@ -173,73 +172,55 @@ module MCP
           200
         end
         
-        # SSE endpoint for streaming
+        # SSE endpoint - returns the message endpoint for subsequent requests
         get '/sse' do
           content_type 'text/event-stream'
           headers 'Cache-Control' => 'no-cache',
                   'Connection' => 'keep-alive'
           
-          stream do |out|
-            # Send initial connection message
-            out << "data: #{JSON.generate({
-              type: 'connection',
-              server: {
-                name: server_instance.name,
-                version: server_instance.version,
-                tools: server_instance.list_tools
-              }
-            })}\n\n"
-            
-            # Keep connection alive with heartbeat
-            begin
-              loop do
-                sleep 30
-                out << "data: #{JSON.generate({type: 'heartbeat', timestamp: Time.now.to_i})}\n\n"
-              end
-            rescue => e
-              # Client disconnected
-            end
-          end
+          # Send endpoint event as per MCP SSE protocol
+          response = "event: endpoint\n"
+          response += "data: /mcp/message\n\n"
+          response
         end
         
-        # JSON-RPC endpoint
-        post '/mcp' do
-          content_type 'application/json'
+        # MCP message endpoint - handles POST requests and returns SSE responses
+        post '/mcp/message' do
+          content_type 'text/event-stream'
+          headers 'Cache-Control' => 'no-cache',
+                  'Connection' => 'keep-alive'
           
           begin
             request_data = JSON.parse(request.body.read)
             response = server_instance.send(:handle_request, request_data)
-            response.to_json
+            
+            # Return JSON-RPC response in SSE format
+            sse_response = "data: #{response.to_json}\n\n"
+            sse_response
           rescue JSON::ParserError => e
-            status 400
-            {
+            error_response = {
               jsonrpc: "2.0",
               id: nil,
               error: {
                 code: -32700,
                 message: "Parse error: #{e.message}"
               }
-            }.to_json
+            }
+            "data: #{error_response.to_json}\n\n"
           rescue => e
-            status 500
-            {
+            error_response = {
               jsonrpc: "2.0", 
               id: nil,
               error: {
                 code: -32603,
                 message: "Internal error: #{e.message}"
               }
-            }.to_json
+            }
+            "data: #{error_response.to_json}\n\n"
           end
         end
         
-        # Tool list endpoint (convenience)
-        get '/tools' do
-          content_type 'application/json'
-          server_instance.list_tools.to_json
-        end
-        
-        # Health check
+        # Health check endpoint (convenience)
         get '/health' do
           content_type 'application/json'
           {
@@ -247,7 +228,12 @@ module MCP
             server: server_instance.name,
             version: server_instance.version,
             type: server_instance.type,
-            tools_count: server_instance.tools.size
+            tools_count: server_instance.tools.size,
+            protocol: 'MCP SSE',
+            endpoints: {
+              sse: '/sse',
+              message: '/mcp/message'
+            }
           }.to_json
         end
       end
