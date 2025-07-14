@@ -137,14 +137,33 @@ server.start
 - Provides REST endpoints and real-time SSE communication
 - Includes CORS support for web applications
 
-#### SSE Server Endpoints
+#### SSE Server Protocol
 
-When running an SSE server, the following HTTP endpoints are available:
+The MCP SSE server follows a specific two-step protocol flow:
 
-- `GET /sse` - Server-Sent Events endpoint for real-time communication
-- `POST /mcp` - JSON-RPC endpoint for tool calls
-- `GET /tools` - List available tools (convenience endpoint)
-- `GET /health` - Server health check
+**Step 1: Get Message Endpoint**
+```bash
+curl http://localhost:8080/sse
+```
+This returns the endpoint information in SSE format:
+```
+event: endpoint
+data: /mcp/message
+```
+
+**Step 2: Send JSON-RPC to Message Endpoint**
+```bash
+curl -X POST http://localhost:8080/mcp/message \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+This returns the JSON-RPC response in SSE format:
+```
+data: {"jsonrpc":"2.0","id":1,"result":{"tools":[...]}}
+```
+
+**Additional Endpoints:**
+- `GET /health` - Server health check (convenience)
 
 #### Server API
 
@@ -165,21 +184,23 @@ The server implements the MCP protocol over JSON-RPC 2.0, supporting:
 
 #### Examples
 
-**Test SSE Server with curl:**
+**Test MCP SSE Protocol with curl:**
 ```bash
-# Health check
-curl http://localhost:8080/health
-
-# List tools
-curl http://localhost:8080/tools
-
-# Server-Sent Events
+# Step 1: Get the message endpoint
 curl http://localhost:8080/sse
+# Returns: event: endpoint\ndata: /mcp/message
 
-# Call a tool via JSON-RPC
-curl -X POST http://localhost:8080/mcp \
+# Step 2: Send JSON-RPC requests to the message endpoint
+curl -X POST http://localhost:8080/mcp/message \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add","arguments":{"a":5,"b":3}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+curl -X POST http://localhost:8080/mcp/message \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":5,"b":3}}}'
+
+# Health check (convenience)
+curl http://localhost:8080/health
 ```
 
 **Test Stdio Server:**

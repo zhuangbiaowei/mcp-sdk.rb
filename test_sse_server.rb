@@ -33,13 +33,19 @@ server.add_tool("greet") do |params|
   }
 end
 
-puts "Starting SSE server..."
-puts "Test endpoints:"
+puts "Starting MCP SSE server..."
+puts "MCP SSE Protocol Flow:"
+puts "1. First call:  curl http://localhost:8080/sse"
+puts "   Returns:     event: endpoint\\ndata: /mcp/message"
+puts ""
+puts "2. Then call:   curl -X POST http://localhost:8080/mcp/message -H 'Content-Type: application/json' -d 'JSON-RPC'"
+puts "   Returns:     data: {JSON-RPC response}"
+puts ""
+puts "Test commands:"
 puts "  curl http://localhost:8080/health"
-puts "  curl http://localhost:8080/tools"
 puts "  curl http://localhost:8080/sse"
-puts "  curl -X POST http://localhost:8080/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'"
-puts "  curl -X POST http://localhost:8080/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"add\",\"arguments\":{\"a\":5,\"b\":3}}}'"
+puts "  curl -X POST http://localhost:8080/mcp/message -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'"
+puts "  curl -X POST http://localhost:8080/mcp/message -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"add\",\"arguments\":{\"a\":5,\"b\":3}}}'"
 
 begin
   server.start
