@@ -123,6 +123,41 @@ end
 server.start
 ```
 
+**Enhanced SSE Server (Advanced Features)**
+```ruby
+require 'mcp-sdk.rb'
+
+# Create Enhanced SSE server with advanced features
+server = MCP::Server.new(
+  name: "Enhanced Demo",
+  version: "1.0.0",
+  type: "enhanced_sse",
+  port: 8080
+)
+
+# Add tools as needed
+server.add_tool("calculate") do |params|
+  operation = params["operation"] || "add"
+  a = params["a"] || 0
+  b = params["b"] || 0
+  
+  result = case operation
+  when "add" then a + b
+  when "multiply" then a * b
+  when "subtract" then a - b
+  when "divide" then b != 0 ? a / b : "Error: Division by zero"
+  else "Unknown operation"
+  end
+  
+  {
+    content: [{ type: "text", text: "#{a} #{operation} #{b} = #{result}" }]
+  }
+end
+
+# Start the Enhanced SSE server
+server.start
+```
+
 #### Server Types
 
 **Stdio Server (`type: "stdio"`)**
@@ -136,6 +171,18 @@ server.start
 - Requires `port` parameter
 - Provides REST endpoints and real-time SSE communication
 - Includes CORS support for web applications
+
+**Enhanced SSE Server (`type: "enhanced_sse"`)**
+- Advanced HTTP server with enhanced SSE capabilities
+- Requires `port` parameter
+- Provides all standard SSE features plus:
+  - Connection management and tracking
+  - Broadcasting to multiple clients
+  - WebSocket-like bidirectional communication simulation
+  - Enhanced health monitoring
+  - Connection status endpoints
+- Includes CORS support for web applications
+- Built with Sinatra for better performance and extensibility
 
 #### SSE Server Protocol
 
@@ -165,12 +212,43 @@ data: {"jsonrpc":"2.0","id":1,"result":{"tools":[...]}}
 **Additional Endpoints:**
 - `GET /health` - Server health check (convenience)
 
+#### Enhanced SSE Server Protocol
+
+The Enhanced SSE server provides all standard SSE endpoints plus advanced features:
+
+**Standard Endpoints:**
+- `GET /sse` - Get message endpoint (MCP protocol compliance)
+- `POST /mcp/message` - Send JSON-RPC requests and receive SSE responses
+- `GET /health` - Enhanced health check with detailed server information
+
+**Advanced Endpoints:**
+- `GET /sse/events` - Advanced SSE endpoint with connection management
+- `POST /mcp/broadcast` - Broadcast messages to all connected SSE clients
+- `GET /ws/connect` - WebSocket-like connection simulation (long polling)
+- `POST /ws/send/:connection_id` - Send messages to specific connections
+- `GET /connections` - View active connection status
+
+**Enhanced SSE Events Example:**
+```bash
+# Connect to advanced SSE endpoint
+curl -N http://localhost:8080/sse/events
+# Returns connection ID and keeps connection alive with heartbeats
+
+# Broadcast to all connected clients
+curl -X POST http://localhost:8080/mcp/broadcast \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+# Check connection status
+curl http://localhost:8080/connections
+```
+
 #### Server API
 
 - `MCP::Server.new(name:, version:, type:, port:)` - Create a new server instance
   - `name`: Server name (required)
   - `version`: Server version (required)  
-  - `type`: Server type - `"stdio"` (default) or `"sse"` (optional)
+  - `type`: Server type - `"stdio"` (default), `"sse"`, or `"enhanced_sse"` (optional)
   - `port`: Port number (required for SSE servers, ignored for stdio)
 - `server.add_tool(name, &block)` - Register a tool with a block that receives parameters
 - `server.start` - Start the server and listen for requests
@@ -222,6 +300,42 @@ Tools should return responses in MCP format:
 ```
 
 For simple text responses, you can return any value and it will be automatically wrapped in the proper format.
+
+## Example Files
+
+This repository includes several example files to help you get started:
+
+- `example_enhanced_sse.rb` - Complete Enhanced SSE server example with multiple tools
+- `enhanced_sse_client.html` - HTML client demo for testing SSE connections
+- `test_enhanced_sse.rb` - Integration test suite for Enhanced SSE functionality
+- `demo_both_servers.rb` - Demonstration of both stdio and SSE servers
+- `example_usage.rb` - Basic usage examples
+
+### Running Examples
+
+**Start Enhanced SSE Server:**
+```bash
+ruby example_enhanced_sse.rb
+```
+Then open `enhanced_sse_client.html` in your browser to test the connection.
+
+**Run Integration Tests:**
+```bash
+ruby test_enhanced_sse.rb
+```
+
+**Test Basic SSE Protocol:**
+```bash
+# Terminal 1: Start server
+ruby example_enhanced_sse.rb
+
+# Terminal 2: Test endpoints
+curl http://localhost:8081/health
+curl http://localhost:8081/sse
+curl -X POST http://localhost:8081/mcp/message \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 
 ## Contributing
 
