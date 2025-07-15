@@ -1,6 +1,8 @@
 require "json"
 require "sinatra/base"
 require "puma"
+require "securerandom"
+require_relative "enhanced_sse_server"
 
 module MCP
   class Server
@@ -33,6 +35,8 @@ module MCP
         start_stdio_server(io_in, io_out)
       when "sse"
         start_sse_server
+      when "enhanced_sse"
+        start_enhanced_sse_server
       else
         raise ArgumentError, "Unknown server type: #{@type}"
       end
@@ -41,6 +45,7 @@ module MCP
     def stop
       @running = false
       @sse_server.stop if @sse_server
+      @enhanced_server.stop if @enhanced_server
     end
 
     def list_tools
@@ -91,7 +96,7 @@ module MCP
       case @type
       when "stdio"
         # No additional validation needed for stdio
-      when "sse"
+      when "sse", "enhanced_sse"
         if @port.nil?
           raise ArgumentError, "Port is required for SSE server type"
         end
@@ -99,7 +104,7 @@ module MCP
           raise ArgumentError, "Port must be a valid integer between 1 and 65535"
         end
       else
-        raise ArgumentError, "Server type must be 'stdio' or 'sse'"
+        raise ArgumentError, "Server type must be 'stdio', 'sse', or 'enhanced_sse'"
       end
     end
 
@@ -129,6 +134,30 @@ module MCP
       puts "  GET /health - Health check"
       
       @sse_server.run.join
+    end
+
+    def start_enhanced_sse_server
+      puts "MCP Server '#{@name}' v#{@version} (Enhanced SSE) starting on port #{@port}..."
+      puts "Available tools: #{@tools.keys.join(', ')}"
+      
+      # Create Enhanced SSE server app
+      app = create_enhanced_sse_app
+      @enhanced_server = Puma::Server.new(app)
+      @enhanced_server.add_tcp_listener("0.0.0.0", @port)
+      
+      puts "Enhanced SSE Server ready at http://localhost:#{@port}"
+      puts "MCP SSE Protocol Endpoints (Enhanced):"
+      puts "  GET /sse - Get message endpoint (returns 'event: endpoint\\ndata: /mcp/message')"
+      puts "  POST /mcp/message - Send JSON-RPC requests and receive SSE responses"
+      puts "  GET /sse/events - Advanced SSE endpoint with connection management"
+      puts "  POST /mcp/broadcast - Broadcast to all connected SSE clients"
+      puts "  GET /ws/connect - WebSocket-like connection (long polling)"
+      puts "  POST /ws/send/:id - Send message to specific connection"
+      puts "  GET /health - Health check with detailed info"
+      puts "  GET /connections - View active connections"
+      
+      # Start the Enhanced SSE server
+      @enhanced_server.run.join
     end
 
     def process_stdio_requests
@@ -234,6 +263,238 @@ module MCP
               sse: '/sse',
               message: '/mcp/message'
             }
+          }.to_json
+        end
+      end
+    end
+
+    def create_enhanced_sse_app
+      server_instance = self
+      sse_connections = []
+      ws_connections = {}
+      connection_mutex = Mutex.new
+      
+      Sinatra.new do
+        set :server, :puma
+        set :bind, '0.0.0.0'
+        set :port, server_instance.port
+        
+        # Enable CORS
+        before do
+          headers 'Access-Control-Allow-Origin' => '*',
+                  'Access-Control-Allow-Methods' => ['GET', 'POST', 'OPTIONS'],
+                  'Access-Control-Allow-Headers' => 'Content-Type'
+        end
+        
+        options '*' do
+          200
+        end
+        
+        # Standard SSE endpoint
+        get '/sse' do
+          content_type 'text/event-stream'
+          headers 'Cache-Control' => 'no-cache',
+                  'Connection' => 'keep-alive'
+          
+          response = "event: endpoint\n"
+          response += "data: /mcp/message\n\n"
+          response
+        end
+        
+        # Enhanced SSE endpoint with connection management
+        get '/sse/events' do
+          content_type 'text/event-stream'
+          headers 'Cache-Control' => 'no-cache',
+                  'Connection' => 'keep-alive',
+                  'X-Accel-Buffering' => 'no'
+          
+          connection_id = SecureRandom.hex(8)
+          
+          stream do |out|
+            connection_mutex.synchronize do
+              sse_connections << {
+                id: connection_id,
+                response: out,
+                created_at: Time.now
+              }
+            end
+            
+            begin
+              out << "event: endpoint\n"
+              out << "data: /mcp/message\n\n"
+              
+              out << "event: connected\n"
+              out << "data: #{connection_id}\n\n"
+              
+              loop do
+                sleep 30
+                out << "event: heartbeat\n"
+                out << "data: #{Time.now.to_i}\n\n"
+              end
+            rescue => e
+              puts "SSE connection error: #{e.message}"
+            ensure
+              connection_mutex.synchronize do
+                sse_connections.reject! { |conn| conn[:id] == connection_id }
+              end
+            end
+          end
+        end
+        
+        # MCP message endpoint
+        post '/mcp/message' do
+          content_type 'text/event-stream'
+          headers 'Cache-Control' => 'no-cache',
+                  'Connection' => 'keep-alive'
+          
+          begin
+            request_data = JSON.parse(request.body.read)
+            response = server_instance.send(:handle_request, request_data)
+            
+            sse_response = "data: #{response.to_json}\n\n"
+            sse_response
+          rescue JSON::ParserError => e
+            error_response = {
+              jsonrpc: "2.0",
+              id: nil,
+              error: {
+                code: -32700,
+                message: "Parse error: #{e.message}"
+              }
+            }
+            "data: #{error_response.to_json}\n\n"
+          rescue => e
+            error_response = {
+              jsonrpc: "2.0", 
+              id: nil,
+              error: {
+                code: -32603,
+                message: "Internal error: #{e.message}"
+              }
+            }
+            "data: #{error_response.to_json}\n\n"
+          end
+        end
+        
+        # Broadcast endpoint
+        post '/mcp/broadcast' do
+          content_type 'application/json'
+          
+          begin
+            request_data = JSON.parse(request.body.read)
+            response = server_instance.send(:handle_request, request_data)
+            
+            broadcasted_count = 0
+            connection_mutex.synchronize do
+              sse_connections.each do |connection|
+                begin
+                  connection[:response] << "event: broadcast\n"
+                  connection[:response] << "data: #{response.to_json}\n\n"
+                  broadcasted_count += 1
+                rescue => e
+                  puts "Broadcast error to connection #{connection[:id]}: #{e.message}"
+                end
+              end
+            end
+            
+            { 
+              status: 'broadcasted', 
+              message: 'Message sent to all connected clients',
+              clients: broadcasted_count,
+              response: response
+            }.to_json
+          rescue => e
+            { status: 'error', message: e.message }.to_json
+          end
+        end
+        
+        # WebSocket simulation
+        get '/ws/connect' do
+          content_type 'text/event-stream'
+          headers 'Cache-Control' => 'no-cache',
+                  'Connection' => 'keep-alive'
+          
+          connection_id = SecureRandom.hex(8)
+          
+          stream do |out|
+            ws_connections[connection_id] = out
+            
+            begin
+              out << "event: ws_connected\n"
+              out << "data: #{connection_id}\n\n"
+              
+              loop do
+                sleep 1
+              end
+            rescue => e
+              puts "WebSocket simulation error: #{e.message}"
+            ensure
+              ws_connections.delete(connection_id)
+            end
+          end
+        end
+        
+        # Send to WebSocket connection
+        post '/ws/send/:connection_id' do
+          connection_id = params[:connection_id]
+          
+          if ws_connections[connection_id]
+            begin
+              request_data = JSON.parse(request.body.read)
+              response = server_instance.send(:handle_request, request_data)
+              
+              ws_connections[connection_id] << "event: ws_message\n"
+              ws_connections[connection_id] << "data: #{response.to_json}\n\n"
+              
+              { status: 'sent', connection_id: connection_id }.to_json
+            rescue => e
+              { status: 'error', message: e.message }.to_json
+            end
+          else
+            status 404
+            { status: 'error', message: 'Connection not found' }.to_json
+          end
+        end
+        
+        # Enhanced health check
+        get '/health' do
+          content_type 'application/json'
+          {
+            status: 'ok',
+            server: server_instance.name,
+            version: server_instance.version,
+            type: 'enhanced_sse',
+            tools_count: server_instance.tools.size,
+            protocol: 'MCP SSE (Enhanced Sinatra)',
+            endpoints: {
+              sse: '/sse',
+              sse_events: '/sse/events',
+              message: '/mcp/message',
+              broadcast: '/mcp/broadcast',
+              ws_connect: '/ws/connect',
+              ws_send: '/ws/send/:connection_id'
+            },
+            connections: {
+              sse: sse_connections.length,
+              ws: ws_connections.length
+            },
+            uptime: Time.now.to_i
+          }.to_json
+        end
+        
+        # Connection status
+        get '/connections' do
+          content_type 'application/json'
+          {
+            sse_connections: sse_connections.map { |conn| 
+              { 
+                id: conn[:id], 
+                created_at: conn[:created_at].iso8601,
+                age_seconds: (Time.now - conn[:created_at]).to_i
+              } 
+            },
+            ws_connections: ws_connections.keys,
+            total: sse_connections.length + ws_connections.length
           }.to_json
         end
       end
